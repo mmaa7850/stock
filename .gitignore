@@ -1,0 +1,23 @@
+# API Key 與環境設定（絕對不能上傳）
+.env
+*.env
+secrets.txt
+
+# AI 分析報告（自動產生的輸出檔）
+*_分析報告_*.txt
+*_實戰報告_*.md
+
+# Python 快取
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+
+# 虛擬環境
+venv/
+.venv/
+env/
+
+# 系統檔案
+.DS_Store
+Thumbs.db
