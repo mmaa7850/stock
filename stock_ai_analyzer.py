@@ -740,7 +740,8 @@ def analyze_with_claude(
     fundamental: dict,
     technical: dict,
     api_key: str,
-) -> str:
+    stream: bool = False,
+):
     """
     傳送 Context 給 Claude API，取得持倉感知的實戰交易決策報告。
 
@@ -924,17 +925,31 @@ def analyze_with_claude(
    （參考：MA20={cs}{technical['ma20']}，MA60={cs}{technical['ma60']}，60日低點={cs}{technical['low_60d']}）
 5. 從 `## 🎯` 直接開始輸出，完整輸出至免責聲明結束，不得截斷或添加前後語。"""
 
-    print(f"\n  正在呼叫 Claude API（{CLAUDE_MODEL}）進行分析...")
-    print("  預計需要 20-50 秒，請耐心等候...\n")
+    if stream:
+        # ── Streamlit 串流模式：回傳 generator 給 st.write_stream() ──────────
+        def _stream_generator():
+            with client.messages.stream(
+                model=CLAUDE_MODEL,
+                max_tokens=MAX_TOKENS,
+                system=system_prompt,
+                messages=[{"role": "user", "content": user_message}],
+            ) as s:
+                for text in s.text_stream:
+                    yield text
+        return _stream_generator()
+    else:
+        # ── CLI 模式：同步等待，印進度提示後回傳完整文字 ─────────────────────
+        print(f"\n  正在呼叫 Claude API（{CLAUDE_MODEL}）進行分析...")
+        print("  預計需要 20-50 秒，請耐心等候...\n")
 
-    message = client.messages.create(
-        model=CLAUDE_MODEL,
-        max_tokens=MAX_TOKENS,
-        system=system_prompt,
-        messages=[{"role": "user", "content": user_message}],
-    )
+        message = client.messages.create(
+            model=CLAUDE_MODEL,
+            max_tokens=MAX_TOKENS,
+            system=system_prompt,
+            messages=[{"role": "user", "content": user_message}],
+        )
 
-    return message.content[0].text
+        return message.content[0].text
 
 
 # ==================== 主程式入口 =============================================
