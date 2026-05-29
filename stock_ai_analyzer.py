@@ -47,11 +47,20 @@ import pandas as pd
 import numpy as np
 from datetime import datetime
 
+# ── Windows cp950/Big5 終端機編碼修正（台灣版 Windows 常見問題）──────────────
+# Streamlit 在 Windows 上 stdout 可能仍走系統 cp950，無法輸出 emoji。
+# 強制改為 UTF-8（errors='replace' 確保萬一還是有奇怪字元時不崩潰）。
+if hasattr(sys.stdout, "reconfigure"):
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
 
 # ── 全域設定 ──────────────────────────────────────────────────────────────────
 CLAUDE_MODEL = "claude-sonnet-4-6"
 DIVIDEND_YIELD_ANOMALY_THRESHOLD = 0.20  # 股息率超過 20% 視為 yfinance 資料異常
-MAX_TOKENS = 2500                         # 確保報告完整不截斷
+MAX_TOKENS = 5000                         # 確保報告完整不截斷
 
 
 # ==================== Step 0：API Key 取得（安全版）===========================
