@@ -371,6 +371,8 @@ def fetch_fundamental_data(ticker: str) -> dict:
 
     stock = yf.Ticker(ticker)
     info = _yf_retry(lambda: stock.info)
+    if not info:  # yfinance 在雲端有時回傳 None 或 {}
+        info = {}
 
     def safe_get(key, default="N/A", round_digits=None):
         val = info.get(key)
@@ -496,7 +498,7 @@ def fetch_news(ticker: str, max_news: int = 3) -> list:
             content = item.get("content", {})
             if content:
                 title = content.get("title", "無標題")
-                link = content.get("canonicalUrl", {}).get("url", "")
+                link = (content.get("canonicalUrl") or {}).get("url", "")
                 pub_date = content.get("pubDate", "")
             else:
                 title = item.get("title", "無標題")
