@@ -28,6 +28,7 @@ v5.0 核心升級（在 v4.0 防洗盤基礎上解決指標時空錯亂問題）
 
 import os
 import sys
+import time
 import getpass
 import builtins as _builtins
 
@@ -61,6 +62,34 @@ if hasattr(sys.stdout, "reconfigure"):
 CLAUDE_MODEL = "claude-sonnet-4-6"
 DIVIDEND_YIELD_ANOMALY_THRESHOLD = 0.20  # 股息率超過 20% 視為 yfinance 資料異常
 MAX_TOKENS = 5000                         # 確保報告完整不截斷
+
+
+# ── Yahoo Finance 限流重試（Streamlit Cloud 常被 rate-limited）────────────────
+def _yf_retry(func, max_retries: int = 4, base_delay: float = 1.5):
+    """
+    包裝 yfinance 呼叫，遇到 rate-limit / Too Many Requests 時自動重試。
+    Streamlit Cloud 架在 AWS，Yahoo Finance 容易對雲端 IP 限流，
+    等待後重試通常可成功。
+
+    max_retries=4 → 最多嘗試 4 次（含第 1 次），總等待上限 ≈ 1.5+3+6 = 10.5 秒
+    """
+    last_exc: Exception = RuntimeError("未知錯誤")
+    for attempt in range(max_retries):
+        try:
+            return func()
+        except Exception as exc:
+            err_str = str(exc).lower()
+            is_rate_limit = any(k in err_str for k in (
+                "rate", "too many", "429", "ratelimit", "throttle"
+            ))
+            if is_rate_limit and attempt < max_retries - 1:
+                last_exc = exc
+                wait = base_delay * (2 ** attempt)   # 1.5 → 3 → 6 秒
+                print(f"  [!] Yahoo Finance 限流，{wait:.0f} 秒後重試（第 {attempt+1}/{max_retries-1} 次）...")
+                time.sleep(wait)
+            else:
+                raise
+    raise last_exc
 
 
 # ==================== Step 0：API Key 取得（安全版）===========================
@@ -189,7 +218,7 @@ def fetch_raw_hist(ticker: str) -> pd.DataFrame:
     print(f"  [1/3] 正在從 Yahoo Finance 撈取 {ticker} 歷史 K 線（90 日）...")
 
     stock = yf.Ticker(ticker)
-    hist = stock.history(period="90d")
+    hist = _yf_retry(lambda: stock.history(period="90d"))
 
     if hist.empty:
         raise ValueError(
@@ -341,7 +370,7 @@ def fetch_fundamental_data(ticker: str) -> dict:
     print(f"  [2/3] 正在撈取 {ticker} 基本面數據...")
 
     stock = yf.Ticker(ticker)
-    info = stock.info
+    info = _yf_retry(lambda: stock.info)
 
     def safe_get(key, default="N/A", round_digits=None):
         val = info.get(key)
@@ -459,7 +488,7 @@ def fetch_news(ticker: str, max_news: int = 3) -> list:
     news_result = []
 
     try:
-        news_list = stock.news
+        news_list = _yf_retry(lambda: stock.news)
         if not news_list:
             return [{"title": "目前無相關新聞", "date": "", "link": ""}]
 
