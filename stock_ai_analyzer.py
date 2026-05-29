@@ -493,6 +493,16 @@ def build_analysis_context(
     cs = "NT$" if currency == "TWD" else "$"
 
     price = technical["current_price"]
+
+    # ── 市場類型 & 股價區間偵測（決定保本防守線寬容度）──────────────────────
+    # 台股：台股有 10% 漲跌幅限制，盤中震盪幅度可控，可用精準保本邏輯
+    # 美股低價股（< $50）：波動幅度相對小，防守線貼近成本
+    # 美股高價股（≥ $50）：無漲跌幅限制，高價股日內正常震盪輕易達 1~3%，
+    #   若把防守線卡在成本 ±0.2%，開盤前幾分鐘的隨機插針就會誤觸停損，
+    #   因此必須給予 1.5~2% 的波動寬容度，並要求以收盤價而非盤中價執行
+    is_tw_stock      = ".TW" in ticker.upper()                 # 台股（含 .TW / .TWO）
+    is_us_high_price = (not is_tw_stock) and (price >= 50)     # 美股高價股
+
     ma20 = technical["ma20"]
     ma60 = technical["ma60"]
     rsi = technical["rsi"]
@@ -566,32 +576,73 @@ def build_analysis_context(
         else:
             pnl_tier = "深度套牢（<-10%）→ 防洗盤三重濾網；若三條件皆成立則果斷止損"
 
-        # ── v4.0 核心：保本防守線計算 ─────────────────────────────────────
-        # 作用：為獲利持倉建立「禁止低於此價的防守底線」
-        # 規則：最差的情況也要保本出場（Break-even + 一點緩衝）
+        # ── v5.1 核心：自適應保本防守線計算 ──────────────────────────────
+        #
+        # 台股（.TW）：保留精準保本邏輯
+        #   ≥5% 獲利 → 成本 +0.5%；0~5% 獲利 → 成本 +0.2%
+        #
+        # 美股低價股（非 .TW，股價 < $50）：防守線貼近成本
+        #   波動幅度相對小，成本價即可作為合理防守底線
+        #
+        # 美股高價股（非 .TW，股價 ≥ $50）：給予 1.5~2% 波動寬容度
+        #   無漲跌幅限制 + 高價股開盤 30 分鐘震盪輕易達 1~3%，
+        #   防守線必須夠寬，且一律以【當日收盤價】為執行依據，而非盤中插針
         if pnl_pct >= 5:
-            # 獲利超過 5%：防守線設在成本 + 0.5%（確保小幅獲利出場）
-            breakeven_line = round(cost * 1.005, 2)
-            # 另設「獲利保護線」= 鎖住一半獲利
-            profit_lock_line = round(cost + (price - cost) * 0.5, 2)
-            breakeven_note = (
-                f"\n  ★ 保本防守線（v4.0 核心）：{cs}{breakeven_line}"
-                f"（成本 +0.5%，跌破即保本出場，禁止轉盈為虧）"
-                f"\n  ★ 獲利保護線：{cs}{profit_lock_line}"
-                f"（當前獲利的 50%，建議設為移動停利最低防守位）"
-            )
+            if is_tw_stock:
+                breakeven_line   = round(cost * 1.005, 2)
+                profit_lock_line = round(cost + (price - cost) * 0.5, 2)
+                breakeven_note   = (
+                    f"\n  ★ 保本防守線（台股）：{cs}{breakeven_line}"
+                    f"（成本 +0.5%，跌破即保本出場，禁止轉盈為虧）"
+                    f"\n  ★ 獲利保護線：{cs}{profit_lock_line}"
+                    f"（當前獲利的 50%，建議設為移動停利最低防守位）"
+                )
+            elif is_us_high_price:
+                breakeven_line   = round(cost * 0.985, 2)          # 成本 -1.5%
+                profit_lock_line = round(cost + (price - cost) * 0.5, 2)
+                breakeven_note   = (
+                    f"\n  ★ 保本防守線（美股高價股，波動容忍版）：{cs}{breakeven_line}"
+                    f"（成本 -1.5%，已含美股高價股正常日內波動緩衝；"
+                    f"以【當日收盤價】跌破為執行依據，禁止依盤中插針出場）"
+                    f"\n  ★ 獲利保護線：{cs}{profit_lock_line}"
+                    f"（當前獲利的 50%，移動停利最低防守位，同樣以收盤價判斷）"
+                )
+            else:                                                   # 美股低價股 < $50
+                breakeven_line   = round(cost, 2)
+                profit_lock_line = round(cost + (price - cost) * 0.5, 2)
+                breakeven_note   = (
+                    f"\n  ★ 保本防守線（美股低價股）：{cs}{breakeven_line}"
+                    f"（成本價，以【當日收盤價】跌破為執行依據）"
+                    f"\n  ★ 獲利保護線：{cs}{profit_lock_line}"
+                    f"（當前獲利的 50%，建議設為移動停利最低防守位）"
+                )
         elif pnl_pct > 0:
-            # 小幅獲利（0-5%）：防守線設在成本 + 微小緩衝
-            breakeven_line = round(cost * 1.002, 2)
-            profit_lock_line = None
-            breakeven_note = (
-                f"\n  ★ 保本防守線（v4.0 核心）：{cs}{breakeven_line}"
-                f"（成本 +0.2%，獲利空間小，防守線必須在此之上）"
-            )
+            if is_tw_stock:
+                breakeven_line   = round(cost * 1.002, 2)
+                profit_lock_line = None
+                breakeven_note   = (
+                    f"\n  ★ 保本防守線（台股）：{cs}{breakeven_line}"
+                    f"（成本 +0.2%，獲利空間小，防守線必須在此之上）"
+                )
+            elif is_us_high_price:
+                breakeven_line   = round(cost * 0.98, 2)            # 成本 -2%
+                profit_lock_line = None
+                breakeven_note   = (
+                    f"\n  ★ 保本防守線（美股高價股，波動容忍版）：{cs}{breakeven_line}"
+                    f"（成本 -2%，小幅獲利時給予更大寬容度，防止開盤 30 分鐘震盪誤觸；"
+                    f"以【當日收盤價】跌破為執行依據，禁止依盤中插針出場）"
+                )
+            else:                                                   # 美股低價股 < $50
+                breakeven_line   = round(cost, 2)
+                profit_lock_line = None
+                breakeven_note   = (
+                    f"\n  ★ 保本防守線（美股低價股）：{cs}{breakeven_line}"
+                    f"（成本價，以【當日收盤價】跌破為執行依據）"
+                )
         else:
-            breakeven_line = None
+            breakeven_line   = None
             profit_lock_line = None
-            breakeven_note = ""
+            breakeven_note   = ""
 
         # ── v4.0 核心：洗盤偵測分析 ──────────────────────────────────────
         # 整合「股價位置 vs MA20」+「量能比」+「連續跌破天數」
@@ -657,8 +708,8 @@ def build_analysis_context(
 
   ⚙ AI 分析師核心任務（持有者）：
   ① 必須先通過防洗盤三重濾網（條件 A/B/C），才能建議認賠出場
-  ② 若建議續抱，必須給出保本防守線（不得低於 {cs}{breakeven_line if breakeven_line else cost}）
-  ③ 所有防守價格必須是具體數字，並附上「執行前提條件」（縮量則不執行）"""
+  ② 若建議續抱，必須給出保本防守線（不得低於 {cs}{breakeven_line if breakeven_line else cost}{'；以【當日收盤價】為觸發依據，禁止依盤中插針出場' if is_us_high_price else ''}）
+  ③ 所有防守價格必須是具體數字，並附上「執行前提條件」（縮量則不執行{'；美股高價股另加「以收盤價為準，勿在開盤 30 分鐘內執行」' if is_us_high_price else ''}）"""
 
     else:
         position_block = f"""
@@ -794,6 +845,48 @@ def analyze_with_claude(
     #   讓 AI 在叫使用者賣之前，必須先通過三重濾網。
     # - 「執行前提條件」嵌入輸出格式本身，讓每個防守線都帶有量能條件，
     #   從根本上防止「縮量跌破就停損」的教科書式錯誤。
+    # - v5.1 新增：美股高價股（≥ $50）保本防守線自適應 + 開盤震盪保護條款
+
+    # ── 美股高價股補充規則（動態插入 System Prompt）─────────────────────────
+    _is_us_hp = fundamental.get("currency") != "TWD" and technical["current_price"] >= 50
+    _few_shares = (
+        position["holds"]
+        and position.get("shares") is not None
+        and position["shares"] <= 10
+    ) if _is_us_hp else False
+
+    if _is_us_hp:
+        _few_share_note = (
+            f"\n\n【持股極少特別提醒（本次持股 {position.get('shares', '?')} 股）】\n"
+            f"持股數量極少，每股損益對心理影響大。請在報告中明確說明：\n"
+            f"「股價單日 {technical['current_price'] * 0.01:.2f} 美元（~1%）的波動完全正常，\n"
+            f" 不代表趨勢反轉。請以收盤價做判斷，不要因盤中報價起伏而恐慌亂砍。」"
+        ) if _few_shares else ""
+
+        _us_hp_section = f"""
+══════════════════════════════════════════════
+補充：美股高價股執行規則（本次強制適用）
+══════════════════════════════════════════════
+當前標的股價 ≥ $50（美股高價股），以下規則強制覆蓋一般規則：
+
+【執行時機：強制避開開盤震盪窗口】
+美股無漲跌幅限制，高價股在開盤後前 30 分鐘（美東時間 09:30~10:00，
+台灣時間 22:30~23:00）往往出現 1%~3% 的隨機劇烈波動（「插針」），
+盤中暫時觸及防守線後立刻反彈是常態，不代表趨勢真的反轉。
+
+「執行前提條件」中，必須逐字寫出以下內容：
+  ▶ 請勿在開盤後 30 分鐘內（台灣時間 22:30-23:00）執行
+  ▶ 以【當日收盤價】跌破為最終執行依據，而非盤中即時報價
+
+【保本防守線說明】
+Context 中的保本防守線已依美股高價股特性計算（含 1.5%~2% 波動寬容度）。
+AI 分析師直接引用 Context 中的數字，
+不得自行縮窄為台股標準（即禁止改回成本 ±0.2% 或 ±0.5%）。{_few_share_note}
+
+"""
+    else:
+        _us_hp_section = ""
+
     system_prompt = f"""你是一位在頂級對沖基金執行動能交易（Momentum Trading）15 年的機構交易員，
 專精於 AI 半導體題材股的主升浪操盤，深諳主力洗盤心理學。
 
@@ -846,7 +939,7 @@ def analyze_with_claude(
 若使用者目前持有的部位處於獲利狀態（損益為正）：
 
 規則一：短線防守位的設定，絕對不能低於 Context 中的「保本防守線」。
-        （保本防守線 = 成本 × 1.005，已在 Context 中計算好，直接引用數字）
+        （保本防守線已在 Context 中依市場類型自動計算完畢，請直接引用數字）
         違反此規則 = 把賺錢的單子放到賠錢，是最不可饒恕的交易錯誤。
 
 規則二：若 Context 中有「獲利保護線」，優先將此線設為移動停利的防守位。
@@ -855,7 +948,7 @@ def analyze_with_claude(
 規則三：零股投資人（< 1000 股）的防守線應設得更緊，
         因為他們的槓桿和心理壓力都較小，更容易執行精準的停利。
 
-══════════════════════════════════════════════
+{_us_hp_section}══════════════════════════════════════════════
 四、使用者持倉情境
 ══════════════════════════════════════════════
 情境：{"【HOLDER — 持有者策略】" if scenario == "HOLDER" else "【NON_HOLDER — 踏空接刀策略】"}
