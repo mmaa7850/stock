@@ -28,19 +28,32 @@ v5.0 核心升級（在 v4.0 防洗盤基礎上解決指標時空錯亂問題）
 
 import os
 import sys
+import builtins
 import getpass
 
-# Windows 終端機預設 cp950，遇到 emoji 會炸；強制 UTF-8 輸出
-if sys.stdout and hasattr(sys.stdout, "reconfigure"):
+# ── Windows cp950 UnicodeEncodeError 根治方案 ─────────────────────────────
+# Streamlit 在 Windows 上會重導 stdout，reconfigure() 不可靠。
+# 覆寫本模組 print：先嘗試正常輸出；失敗時直接寫底層 fd=1 buffer（UTF-8），
+# 完全繞過 cp950 codec，無論 Streamlit 怎麼重導都不會炸。
+def _safe_print(*args, **kwargs):
     try:
-        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-    except Exception:
-        pass
-if sys.stderr and hasattr(sys.stderr, "reconfigure"):
-    try:
-        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
-    except Exception:
-        pass
+        builtins.print(*args, **kwargs)
+    except UnicodeEncodeError:
+        text = " ".join(str(a) for a in args)
+        end  = kwargs.get("end", "\n")
+        raw  = (text + end).encode("utf-8", errors="replace")
+        try:
+            # 優先寫 stdout.buffer（CPython 標準路徑）
+            if hasattr(sys.stdout, "buffer"):
+                sys.stdout.buffer.write(raw)
+                sys.stdout.buffer.flush()
+            else:
+                # 最後防線：直接寫 OS fd=1
+                os.write(1, raw)
+        except Exception:
+            pass  # 靜默失敗，不讓 print 錯誤中斷主流程
+
+print = _safe_print  # noqa: A001  — 覆寫本模組內所有 print 呼叫
 import anthropic
 import yfinance as yf
 import pandas as pd
