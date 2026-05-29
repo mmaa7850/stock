@@ -12,6 +12,7 @@ from stock_ai_analyzer import (
     fetch_raw_hist,
     fetch_fundamental_data,
     fetch_news,
+    fetch_live_web_intelligence,          # v5.3 新增
     calculate_technical_from_hist,
     build_analysis_context,
     analyze_with_claude,
@@ -276,10 +277,24 @@ if st.session_state.run_analysis or st.session_state.analysis_done:
 
     # ── 串流輸出（首次）或渲染快取（後續重跑）──────────────────────────────
     if st.session_state.run_analysis:
-        # 第一次：組 context → 串流 → 快取
+        # 第一次：即時情報搜尋 → 組 context → 串流 → 快取
+
+        # v5.3：即時全網情報搜尋（在等待串流前完成，通常需 3~8 秒）
+        with st.spinner("🔍 正在搜尋即時全網情報（DuckDuckGo）…"):
+            live_intel = fetch_live_web_intelligence(
+                ticker_input,
+                fundamental.get("company_name", ticker_input),
+                fundamental.get("currency", "USD"),
+            )
+
+        # 顯示情報摘要（可展開）
+        if live_intel and "⚠️" not in live_intel[:10]:
+            with st.expander("📡 即時全網情報（AI 已納入分析）", expanded=False):
+                st.text(live_intel)
+
         with st.spinner("組建分析數據中…"):
             context = build_analysis_context(
-                ticker_input, technical, fundamental, news, position
+                ticker_input, technical, fundamental, news, position, live_intel
             )
 
         try:

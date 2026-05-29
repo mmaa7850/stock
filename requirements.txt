@@ -3,3 +3,4 @@ yfinance>=0.2.40
 pandas>=2.0.0
 numpy>=1.24.0
 streamlit>=1.35.0
+ddgs>=0.1.0                 # 即時全網搜尋（DuckDuckGo，原 duckduckgo-search）

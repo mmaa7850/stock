@@ -472,6 +472,119 @@ def fetch_news(ticker: str, max_news: int = 3) -> list:
     return news_result or [{"title": "目前無相關新聞", "date": "", "link": ""}]
 
 
+# ==================== 即時全網輿情搜尋（v5.3 新功能）===========================
+
+def fetch_live_web_intelligence(
+    ticker: str,
+    company_name: str,
+    currency: str,
+    max_results: int = 5,
+) -> str:
+    """
+    即時全網輿情搜尋（v5.3）。
+
+    使用 DuckDuckGo 搜尋引擎（免費、無需 API Key、不受 Google CAPTCHA 封鎖），
+    自動抓取最新外資目標價調整、法說會重點、供需題材等高價值情報。
+
+    搜尋策略：
+      - 台股（.TW）：中文主查詢（外資 目標價 法說會）+ 中英補充查詢
+      - 美股（非 .TW）：英文主查詢（analyst upgrade target price）
+      - 時間範圍：最近 30 天（timelimit="m"），只取最新情報
+      - 去重：以標題去重，避免同一篇報導重複出現
+
+    回傳：格式化情報區塊文字，供 Claude 作為最高優先催化劑評估。
+    若模組未安裝或搜尋失敗，回傳友善的錯誤說明（不中斷主程式）。
+    """
+    print(f"  [🔍 v5.3] 正在搜尋 {ticker} 即時全網情報（DuckDuckGo）...")
+
+    is_tw = ".TW" in ticker.upper()
+    ticker_clean = ticker.upper().replace(".TW", "").replace(".TWO", "")
+
+    # ── 搜尋關鍵字組合（雙 Query，提高覆蓋率）─────────────────────────────────
+    if is_tw:
+        queries = [
+            f"{company_name} 外資 目標價 調升 法說會 最新",
+            f"{company_name} {ticker_clean} 題材 外資報告 產業",
+        ]
+    else:
+        queries = [
+            f"{ticker} {company_name} analyst upgrade target price institutional 2025 2026",
+            f"{ticker} supply demand earnings guidance catalyst semiconductor AI",
+        ]
+
+    # ── DuckDuckGo 搜尋 ───────────────────────────────────────────────────────
+    # 優先使用新名稱 ddgs（舊名 duckduckgo_search 仍可用但顯示棄用警告）
+    try:
+        from ddgs import DDGS
+    except ImportError:
+        try:
+            from duckduckgo_search import DDGS
+        except ImportError:
+            return (
+                "  ⚠️ 【即時搜尋模組未安裝】\n"
+                "  請執行：pip install ddgs\n"
+                "  安裝後重新執行即可啟用即時全網情報搜尋功能。"
+            )
+
+    all_results: list[dict] = []
+    seen_titles: set[str]   = set()
+
+    try:
+        with DDGS() as ddgs:
+            for query in queries:
+                if len(all_results) >= max_results:
+                    break
+                try:
+                    hits = ddgs.text(
+                        query,
+                        region    = "tw-tzh" if is_tw else "us-en",
+                        safesearch= "off",
+                        timelimit = "m",             # 最近 30 天
+                        max_results = max_results,
+                    )
+                    for r in (hits or []):
+                        title = (r.get("title") or "").strip()
+                        if not title or title in seen_titles:
+                            continue
+                        seen_titles.add(title)
+                        all_results.append({
+                            "title": title,
+                            "body":  (r.get("body") or "").strip(),
+                            "href":  (r.get("href") or ""),
+                        })
+                        if len(all_results) >= max_results:
+                            break
+                except Exception:
+                    continue   # 單一 query 失敗不影響整體流程
+    except Exception as exc:
+        return f"  ⚠️ 網路情報搜尋失敗：{type(exc).__name__}: {str(exc)[:120]}"
+
+    if not all_results:
+        return "  ⚠️ 未搜尋到相關即時情報（可能為非交易時段或關鍵字無匹配）"
+
+    # ── 格式化輸出 ────────────────────────────────────────────────────────────
+    lines = [
+        f"  搜尋引擎：DuckDuckGo  ｜  搜尋時間：{datetime.now().strftime('%Y-%m-%d %H:%M')}（近 30 天）",
+        f"  主查詢：「{queries[0]}」",
+        "",
+    ]
+    for i, r in enumerate(all_results, 1):
+        lines.append(f"  [{i}] {r['title']}")
+        if r.get("body"):
+            snippet = r["body"][:200].replace("\n", " ").strip()
+            if len(r["body"]) > 200:
+                snippet += "…"
+            lines.append(f"      摘要：{snippet}")
+        if r.get("href"):
+            url = r["href"]
+            if len(url) > 90:
+                url = url[:87] + "…"
+            lines.append(f"      來源：{url}")
+        lines.append("")
+
+    return "\n".join(lines).rstrip()
+
+
 # ==================== 建構傳給 Claude 的 Context ================================
 
 def build_analysis_context(
@@ -480,6 +593,7 @@ def build_analysis_context(
     fundamental: dict,
     news: list,
     position: dict,
+    live_intel: str = "",    # v5.3 新增：即時全網情報（DuckDuckGo 搜尋結果）
 ) -> str:
     """
     將技術面、基本面、新聞、持倉資訊整合為結構化文字 Context。
@@ -798,6 +912,9 @@ def build_analysis_context(
   AI 實戰分析數據包  ｜  {ticker}  ｜  {technical['last_date']}
 ════════════════════════════════════════════════════
   {price_data_note}
+
+▌【v5.3 即時全網情報】（DuckDuckGo 即時搜尋，最新外資報告 / 法說會 / 題材催化劑）
+{live_intel if live_intel else "  ⚠️ 本次未執行即時搜尋（live_intel 為空）"}
 {growth_flag}
 
 ▌【v5.2 動態市場型態分析】（Python 端預判，AI 直接使用此分類，禁止自行覆蓋）
@@ -997,6 +1114,47 @@ AI 分析師直接引用 Context 中的數字，
 你的核心信條：
 「認賠必須賠得有道理。縮量跌破成本不是理由，題材破壞才是理由。」
 「獲利的單子，絕對不能因為短暫震盪而讓它變成虧損的單子。」
+「情報比線型更早，外資抬轎時死等均線是最貴的保守主義。」
+
+══════════════════════════════════════════════
+零、即時全網情報催化劑（最高優先級評估）
+══════════════════════════════════════════════
+Context 中包含「即時全網情報（v5.3 即時搜尋）」區塊，
+這是本次分析前 AI 剛從網路直接搜尋的最新情報，時效性遠高於靜態財務數據。
+
+【催化劑強度評估（四級判定，強制執行）】
+
+★★★★ 極強催化劑（立即切換「極速卡位」模式）：
+  - 外資集體調升目標價（多家同日調升，如：大摩 + 花旗同日上修）
+  - 法說會釋出超預期正面財測（EPS / 營收大幅上修）
+  - 供需缺口突然擴大（缺貨、漲價、搶單）
+  - 重大合約勝訴或新客戶導入（具名、金額大）
+  ⇒ 此時即使型態 A 乖離率極高，也必須給出「極速卡位策略」，禁止保守等待
+
+★★★☆ 強催化劑（上調動能評分，維持進取策略）：
+  - 單一外資大幅調升目標價（升幅 ≥ 10%）
+  - 產業研究報告出現明顯正面偏斜
+  - 重要科技大廠同類股集體上漲（板塊帶動）
+
+★★☆☆ 中性情報（維持既有型態策略）：
+  - 零散新聞，無明確方向性
+  - 分析師維持目標價不變
+
+★☆☆☆ 負面情報（下調動能評分，提高風險係數）：
+  - 外資調降目標價或降評
+  - 財報不如預期，下修財測
+  - 產業逆風、競爭加劇
+
+【輸出強制規定】
+在「核心行動決策」的首行，必須列出：
+「📡 情報催化劑：[提取 2~3 個最重要的情報標題關鍵字，或標注「本次搜尋無重大情報」]」
+讓使用者明確知道 AI 是看到了什麼消息才做出此決策。
+
+【情報優先於技術面的例外情形】
+若情報確認為「★★★★ 極強催化劑」：
+  即使 RSI > 80 / 乖離率極高，也必須給出卡位策略
+  不得以「技術面過熱，建議等待」理由拒絕給進場點
+  改為：強調使用輕倉（10~15%）、以 MA5 或突破高點為基準的快攻快守策略
 
 ══════════════════════════════════════════════
 一、動能交易估值準則（禁止違反）
@@ -1124,10 +1282,13 @@ Context 已由 Python 端預判好「AI 判定市場型態」標籤，直接使�
   型態 B → 防洗盤蹲點 / 均線保衛戰 / 分批布局
   型態 C → 左側試單 / 底部重估 / 催化劑等待】
 
-[2-3 句說明核心邏輯，必須直接點明型態判定結果與對應策略。
-型態 A：說明「此股處於動能主升浪，死等均線必踏空，改用 MA5 追擊策略」。
-型態 B：說明防洗盤三重濾網判斷結果，是否叫出場。
-型態 C：說明底部築底現狀與主要催化劑。不說廢話，直接切入。]
+📡 **情報催化劑**：[從即時全網情報中提取 2~3 個最關鍵標題或關鍵字；若搜尋失敗則標注「本次搜尋無情報」]
+💡 **催化劑強度評估**：[★★★★ 極強 / ★★★☆ 強 / ★★☆☆ 中性 / ★☆☆☆ 負面]
+
+[2-3 句說明核心邏輯，必須直接點明型態判定 + 情報強度共同驅動的策略方向。
+型態 A + 極強情報：「外資瘋狂抬轎 + 主升浪格局，極速卡位，不等均線回踩」。
+型態 A + 中性情報：「技術面強勢但情報面無重大催化，輕倉 MA5 蹲點，不追高」。
+型態 B：說明防洗盤三重濾網判斷結果。型態 C：說明底部現狀與催化劑。]
 
 ---
 
@@ -1154,17 +1315,28 @@ Context 已由 Python 端預判好「AI 判定市場型態」標籤，直接使�
 
 {context}
 
-輸出前五重確認：
-1. 【型態策略鎖定】先確認「AI 判定市場型態」標籤，依型態切換策略分支，禁止混用
-   型態 A → 輸出強勢追擊三步驟（MA5 試單、爆量追進、K 棒低點停損），禁止給等均線建議
-   型態 B → 防洗盤三重濾網 + 常規蹲點，正常輸出
+輸出前六重確認：
+1. 【情報優先評估】先閱讀 Context 中的「即時全網情報」區塊，判定催化劑強度（★ 1-4 顆）
+   ★★★★ 極強情報（外資集體調升 / 法說會大幅上修 / 供需缺口爆發）→ 切換「極速卡位」模式
+   ★★★☆ 強情報（單一大幅調升目標價）→ 上調動能評分，維持進取策略
+   ★★☆☆ 中性 / ★☆☆☆ 負面 → 依型態正常分析
+
+2. 【型態策略鎖定】依「AI 判定市場型態」切換策略分支，禁止混用
+   型態 A → 強勢追擊三步驟（MA5 試單、爆量追進、K 棒低點停損），禁止給等均線建議
+   型態 B → 防洗盤三重濾網 + 常規蹲點
    型態 C → 左側交易 / 價值重估，保守建倉
-2. 若股息率標示「數據異常」，基本面分析完全不引用此數字
-3. 若有「⚡ 動能題材標記」，以 Forward P/E + PEG 為主要估值框架，不得以高 P/E 喊貴
-4. 風險防守線的「執行前提條件」必須包含量能條件
+
+3. 在「核心行動決策」首行，必須列出：
+   「📡 情報催化劑：[2~3 個關鍵情報標題/關鍵字] ｜ 催化劑強度：★X顆」
+
+4. 若股息率標示「數據異常」，基本面分析完全不引用此數字
+   若有「⚡ 動能題材標記」，以 Forward P/E + PEG 為主要估值框架，不得以高 P/E 喊貴
+
+5. 風險防守線的「執行前提條件」必須包含量能條件
    （型態 B：縮量跌破 = 洗盤 = 不執行；放量 ≥ 1.5 倍 + 連續 2 日跌破 = 才考慮執行）
-5. 若使用者持倉為獲利狀態，防守價格不得低於 Context 中的「保本防守線」
-   （參考：MA5={cs}{technical.get('ma5','N/A')}，MA20={cs}{technical['ma20']}，MA60={cs}{technical['ma60']}，MA20 乖離率={_ma20_dev_str}）
+   若使用者持倉為獲利狀態，防守價格不得低於 Context 中的「保本防守線」
+   （參考：MA5={cs}{technical.get('ma5','N/A')}，MA20={cs}{technical['ma20']}，MA60={cs}{technical['ma60']}，乖離率={_ma20_dev_str}）
+
 6. 從 `## 🎯` 直接開始輸出，完整輸出至免責聲明結束，不得截斷或添加前後語。"""
 
     if stream:
@@ -1220,9 +1392,16 @@ def main():
         # ── Step 2a：撈取原始 K 線 DataFrame（不計算任何指標）────────────────
         hist = fetch_raw_hist(ticker)
 
-        # ── Step 2b：撈取基本面與新聞（與 K 線並行完成）─────────────────────
+        # ── Step 2b：撈取基本面、新聞 & 即時全網情報 ─────────────────────────
         fundamental_data = fetch_fundamental_data(ticker)
-        news_data = fetch_news(ticker, max_news=3)
+        news_data        = fetch_news(ticker, max_news=3)
+
+        # v5.3：即時全網情報（DuckDuckGo 搜尋，需 pip install duckduckgo-search）
+        live_intel = fetch_live_web_intelligence(
+            ticker,
+            fundamental_data.get("company_name", ticker),
+            fundamental_data.get("currency", "USD"),
+        )
 
         cs = "NT$" if fundamental_data["currency"] == "TWD" else "$"
 
@@ -1283,9 +1462,9 @@ def main():
 
         print("─" * 62)
 
-        # Step 4：打包 Context
+        # Step 4：打包 Context（含即時全網情報）
         context = build_analysis_context(
-            ticker, technical_data, fundamental_data, news_data, position
+            ticker, technical_data, fundamental_data, news_data, position, live_intel
         )
 
         # Step 5：呼叫 Claude API
