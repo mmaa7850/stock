@@ -52,7 +52,7 @@ def get_api_key() -> str:
     """
     key = os.environ.get("ANTHROPIC_API_KEY", "").strip()
     if key:
-        print("  [OK]  已從環境變數讀取 API Key。")
+        print("  ✅  已從環境變數讀取 API Key。")
         return key
 
     print("\n  請輸入您的 Anthropic API Key（輸入時字元不顯示）：")
@@ -60,7 +60,7 @@ def get_api_key() -> str:
     key = getpass.getpass("  API Key：").strip()
 
     if not key:
-        print("[ERR]  API Key 不能為空，程式結束。")
+        print("❌  API Key 不能為空，程式結束。")
         sys.exit(1)
 
     return key
@@ -103,7 +103,7 @@ def get_position_info(ticker: str, current_price: float, currency: str) -> dict:
                 raise ValueError
             break
         except ValueError:
-            print("  [!]  請輸入有效正數（例如：1250 或 1250.50）")
+            print("  ⚠  請輸入有效正數（例如：1250 或 1250.50）")
 
     # ── 問題 C：持有股數 ──────────────────────────────────────────────────
     while True:
@@ -115,7 +115,7 @@ def get_position_info(ticker: str, current_price: float, currency: str) -> dict:
                 raise ValueError
             break
         except ValueError:
-            print("  [!]  請輸入有效正整數（例如：1000 代表 1 張；500 代表零股）")
+            print("  ⚠  請輸入有效正整數（例如：1000 代表 1 張；500 代表零股）")
 
     # ── 計算未實現損益 ─────────────────────────────────────────────────────
     unrealized_pnl = round((current_price - cost_basis) * shares, 2)
@@ -191,7 +191,7 @@ def ask_realtime_price(delayed_price: float, currency: str) -> float:
     """
     cs = "NT$" if currency == "TWD" else "$"
 
-    print(f"\n  [!]   Yahoo Finance 延遲股價：{cs}{delayed_price}")
+    print(f"\n  ⚠   Yahoo Finance 延遲股價：{cs}{delayed_price}")
     print(f"       （通常落後市場約 10~15 分鐘，盤中波動時可能嚴重失真）")
 
     raw = input(
@@ -200,18 +200,18 @@ def ask_realtime_price(delayed_price: float, currency: str) -> float:
     ).strip()
 
     if not raw:
-        print(f"  [OK]  採用 Yahoo 延遲數據 → {cs}{delayed_price}")
+        print(f"  ✅  採用 Yahoo 延遲數據 → {cs}{delayed_price}")
         return delayed_price
 
     try:
         realtime = float(raw)
         if realtime <= 0:
             raise ValueError
-        print(f"  [OK]  即時股價修正：{cs}{delayed_price} → {cs}{realtime}")
+        print(f"  ✅  即時股價修正：{cs}{delayed_price} → {cs}{realtime}")
         print(f"       所有技術指標（MA20 / MA60 / RSI）將基於此即時價重算。")
         return realtime
     except ValueError:
-        print(f"  [!]   無效輸入，降級採用 Yahoo 延遲數據 → {cs}{delayed_price}")
+        print(f"  ⚠   無效輸入，降級採用 Yahoo 延遲數據 → {cs}{delayed_price}")
         return delayed_price
 
 
@@ -466,7 +466,7 @@ def fetch_news(ticker: str, max_news: int = 3) -> list:
             })
 
     except Exception as e:
-        print(f"  [!]  新聞撈取失敗（{e}），以空白新聞繼續。")
+        print(f"  ⚠  新聞撈取失敗（{e}），以空白新聞繼續。")
         return [{"title": "新聞暫時無法取得", "date": "", "link": ""}]
 
     return news_result or [{"title": "目前無相關新聞", "date": "", "link": ""}]
@@ -495,7 +495,7 @@ def fetch_live_web_intelligence(
     回傳：格式化情報區塊文字，供 Claude 作為最高優先催化劑評估。
     若模組未安裝或搜尋失敗，回傳友善的錯誤說明（不中斷主程式）。
     """
-    print(f"  [[SEARCH] v5.3] 正在搜尋 {ticker} 即時全網情報（DuckDuckGo）...")
+    print(f"  [🔍 v5.3] 正在搜尋 {ticker} 即時全網情報（DuckDuckGo）...")
 
     is_tw = ".TW" in ticker.upper()
     ticker_clean = ticker.upper().replace(".TW", "").replace(".TWO", "")
@@ -1486,7 +1486,7 @@ def main():
     ticker = input("  請輸入股票代號：").strip().upper()
 
     if not ticker:
-        print("[ERR]  股票代號不能為空！")
+        print("❌  股票代號不能為空！")
         sys.exit(1)
 
     print(f"\n  開始撈取 {ticker} 數據...\n" + "─" * 62)
@@ -1526,11 +1526,11 @@ def main():
 
         # ── 顯示數據摘要 ──────────────────────────────────────────────────
         print("\n" + "─" * 62)
-        print("  [OK]  數據就緒，摘要如下：")
+        print("  ✅  數據就緒，摘要如下：")
 
         # v5.0：顯示是否套用即時修正
         if technical_data["price_overridden"]:
-            print(f"  [!]  股價：Yahoo 延遲 {cs}{technical_data['yahoo_delayed_price']}"
+            print(f"  ⚡  股價：Yahoo 延遲 {cs}{technical_data['yahoo_delayed_price']}"
                   f" → 即時修正 {cs}{technical_data['current_price']}")
         else:
             print(f"     股價：{cs}{technical_data['current_price']}（Yahoo 延遲數據）")
@@ -1552,16 +1552,16 @@ def main():
                   f"（{'+' if pnl_pct >= 0 else ''}{pnl_pct:.2f}%）")
             # 連續 MA20 跌破偵測結果（v4.0 保留）
             if technical_data.get("consecutive_ma20_break"):
-                print("  [FAIL]  偵測到連續 2 日跌破 MA20（條件 B 初步成立），洗盤分析啟動")
+                print("  🔴  偵測到連續 2 日跌破 MA20（條件 B 初步成立），洗盤分析啟動")
             elif technical_data.get("today_below_ma20"):
-                print("  [WARN]  今日跌破 MA20 但昨日未破（單日，可能為洗盤），持續觀察")
+                print("  🟡  今日跌破 MA20 但昨日未破（單日，可能為洗盤），持續觀察")
             else:
-                print("  [PASS]  股價仍在 MA20 之上，無洗盤疑慮")
+                print("  🟢  股價仍在 MA20 之上，無洗盤疑慮")
         else:
             print("     持倉狀態：未持有，將提供接刀進場策略")
 
         if fundamental_data.get("is_high_growth") or fundamental_data.get("pe_compression_note"):
-            print("  [!]  偵測到高成長 / AI 題材股，啟用動能交易估值框架")
+            print("  ⚡  偵測到高成長 / AI 題材股，啟用動能交易估值框架")
 
         print("─" * 62)
 
@@ -1587,22 +1587,22 @@ def main():
             filepath = os.path.join(os.path.dirname(os.path.abspath(__file__)), filename)
             with open(filepath, "w", encoding="utf-8") as f:
                 f.write(analysis_report)
-            print(f"\n  [OK]  報告已儲存至：{filepath}")
+            print(f"\n  ✅  報告已儲存至：{filepath}")
 
     except ValueError as e:
-        print(f"\n[ERR]  數據錯誤：{e}")
+        print(f"\n❌  數據錯誤：{e}")
         sys.exit(1)
     except anthropic.AuthenticationError:
-        print("\n[ERR]  API Key 驗證失敗，請確認金鑰是否正確且有效。")
+        print("\n❌  API Key 驗證失敗，請確認金鑰是否正確且有效。")
         sys.exit(1)
     except anthropic.RateLimitError:
-        print("\n[ERR]  API 呼叫頻率超限，請稍後再試。")
+        print("\n❌  API 呼叫頻率超限，請稍後再試。")
         sys.exit(1)
     except KeyboardInterrupt:
         print("\n\n  使用者中止。")
         sys.exit(0)
     except Exception as e:
-        print(f"\n[ERR]  未預期錯誤：{type(e).__name__}: {e}")
+        print(f"\n❌  未預期錯誤：{type(e).__name__}: {e}")
         raise
 
 
