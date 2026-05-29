@@ -236,16 +236,32 @@ if st.session_state.run_analysis or st.session_state.analysis_done:
     cs          = "NT$" if fundamental.get("currency") == "TWD" else "$"
 
     # ── 數據摘要卡片 ─────────────────────────────────────────────────────────
-    c1, c2, c3, c4 = st.columns(4)
+    # ── 計算乖離率與型態標籤（與 build_analysis_context 邏輯一致）──────────
+    _p   = technical["current_price"]
+    _m5  = technical.get("ma5",  technical["ma20"])
+    _m20 = technical["ma20"]
+    _m60 = technical["ma60"]
+    _is_us_hp_app = (fundamental.get("currency") != "TWD") and _p >= 50
+    _dev_app = round((_p - _m20) / _m20 * 100, 2)
+    _ra_th   = 8.0 if _is_us_hp_app else 12.0
+    if _p > _m5 > _m20 > _m60 and _dev_app > _ra_th:
+        _regime_tag = "🚨 型態 A"
+    elif _p > _m20 and _m20 > _m60:
+        _regime_tag = "📈 型態 B"
+    else:
+        _regime_tag = "🔍 型態 C"
+
+    c1, c2, c3, c4, c5 = st.columns(5)
     price_tag = (
-        f"⚡ {cs}{technical['current_price']}（即時修正）"
+        f"⚡ {cs}{technical['current_price']}（即時）"
         if technical["price_overridden"]
         else f"{cs}{technical['current_price']}（延遲）"
     )
-    c1.metric("當前股價",     price_tag)
-    c2.metric("MA20 / MA60", f"{cs}{technical['ma20']} / {cs}{technical['ma60']}")
-    c3.metric("RSI(14)",     technical["rsi"])
-    c4.metric("今日量能倍數", f"{technical.get('volume_ratio', 'N/A')}×")
+    c1.metric("當前股價",          price_tag)
+    c2.metric("MA5 / MA20 / MA60", f"{cs}{_m5} / {cs}{_m20} / {cs}{_m60}")
+    c3.metric("MA20 乖離率",       f"{_dev_app:+.2f}%")
+    c4.metric("RSI / 量能倍數",    f"{technical['rsi']} / {technical.get('volume_ratio', 'N/A')}×")
+    c5.metric("AI 判定型態",       _regime_tag)
 
     if position["holds"]:
         pnl     = position["unrealized_pnl"]
