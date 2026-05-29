@@ -29,18 +29,6 @@ v5.0 核心升級（在 v4.0 防洗盤基礎上解決指標時空錯亂問題）
 import os
 import sys
 import getpass
-
-# Windows 終端機預設 cp950，遇到 emoji 會炸；強制 UTF-8 輸出
-if sys.stdout and hasattr(sys.stdout, "reconfigure"):
-    try:
-        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-    except Exception:
-        pass
-if sys.stderr and hasattr(sys.stderr, "reconfigure"):
-    try:
-        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
-    except Exception:
-        pass
 import anthropic
 import yfinance as yf
 import pandas as pd
