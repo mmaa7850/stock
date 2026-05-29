@@ -29,6 +29,18 @@ v5.0 核心升級（在 v4.0 防洗盤基礎上解決指標時空錯亂問題）
 import os
 import sys
 import getpass
+import builtins as _builtins
+
+# ── Windows cp950 安全 print（覆蓋模組內所有 print 呼叫）────────────────────────
+# 在 Windows 傳統中文環境（cp950）下，emoji 無法編碼會導致 UnicodeEncodeError。
+# 此覆蓋僅影響本模組，將無法編碼的字元替換為 ? 而非崩潰。
+def print(*args, **kwargs):  # noqa: A001
+    try:
+        _builtins.print(*args, **kwargs)
+    except UnicodeEncodeError:
+        sep = kwargs.get('sep', ' ')
+        safe_args = [str(a).encode('cp950', 'replace').decode('cp950') for a in args]
+        _builtins.print(*safe_args, **{k: v for k, v in kwargs.items()})
 import anthropic
 import yfinance as yf
 import pandas as pd
