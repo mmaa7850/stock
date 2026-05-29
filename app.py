@@ -5,6 +5,21 @@
 用法：streamlit run app.py
 """
 
+# ── Windows cp950 安全 print（必須在所有 import 之前）────────────────────────
+# Streamlit 只重載 app.py，不重載已快取的模組（如 stock_ai_analyzer）。
+# 在此全域修補 builtins.print，確保所有模組的 print 都不會在 cp950 系統崩潰。
+import builtins as _builtins
+if not getattr(_builtins.print, '_cp950_safe', False):
+    _orig_print = _builtins.print
+    def _safe_print(*args, **kwargs):
+        try:
+            _orig_print(*args, **kwargs)
+        except UnicodeEncodeError:
+            safe = [str(a).encode('cp950', 'replace').decode('cp950') for a in args]
+            _orig_print(*safe, **kwargs)
+    _safe_print._cp950_safe = True
+    _builtins.print = _safe_print
+
 from datetime import datetime
 import streamlit as st
 
