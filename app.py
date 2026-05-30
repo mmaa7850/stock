@@ -21,6 +21,7 @@ if not getattr(_builtins.print, '_cp950_safe', False):
     _builtins.print = _safe_print
 
 from datetime import datetime
+import re
 import streamlit as st
 
 from stock_ai_analyzer import (
@@ -32,6 +33,76 @@ from stock_ai_analyzer import (
     build_analysis_context,
     analyze_with_claude,
 )
+
+
+# ── Markdown → HTML 轉換（下載用）───────────────────────────────────────────
+def _to_html(md_text: str, ticker: str) -> str:
+    """
+    將 Markdown 分析報告轉成自帶樣式的 HTML，可直接在手機/瀏覽器開啟。
+    不依賴外部套件，手動轉換常用的 Markdown 語法。
+    """
+    lines = md_text.split("\n")
+    html_lines = []
+    for line in lines:
+        # 標題
+        if line.startswith("### "):
+            line = f"<h3>{line[4:]}</h3>"
+        elif line.startswith("## "):
+            line = f"<h2>{line[3:]}</h2>"
+        elif line.startswith("# "):
+            line = f"<h1>{line[2:]}</h1>"
+        # 水平線
+        elif line.strip() in ("---", "***", "___"):
+            line = "<hr>"
+        # 一般行：處理 bold / italic
+        else:
+            line = re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", line)
+            line = re.sub(r"\*(.+?)\*",     r"<em>\1</em>",          line)
+            line = re.sub(r"`(.+?)`",        r"<code>\1</code>",      line)
+            if line.strip() == "":
+                line = "<br>"
+            else:
+                line = f"<p>{line}</p>"
+        html_lines.append(line)
+
+    body = "\n".join(html_lines)
+    ts   = datetime.now().strftime("%Y-%m-%d %H:%M")
+    return f"""<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{ticker} AI 分析報告 — {ts}</title>
+<style>
+  body {{
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+    max-width: 820px; margin: 0 auto; padding: 24px 20px;
+    background: #ffffff; color: #1a1a1a; line-height: 1.75;
+    font-size: 16px;
+  }}
+  h1 {{ font-size: 1.7em; border-bottom: 2px solid #0070f3; padding-bottom: 8px; color: #0070f3; }}
+  h2 {{ font-size: 1.35em; color: #005cc5; margin-top: 1.6em; }}
+  h3 {{ font-size: 1.1em;  color: #333; margin-top: 1.2em; }}
+  hr {{ border: none; border-top: 1px solid #ddd; margin: 20px 0; }}
+  strong {{ color: #111; }}
+  code {{ background: #f4f4f4; padding: 2px 6px; border-radius: 4px; font-size: 0.9em; }}
+  p  {{ margin: 6px 0; }}
+  .meta {{ font-size: 0.8em; color: #888; margin-bottom: 24px; }}
+  @media (prefers-color-scheme: dark) {{
+    body {{ background: #121212; color: #e0e0e0; }}
+    h1   {{ color: #4fc3f7; border-color: #4fc3f7; }}
+    h2   {{ color: #81d4fa; }}
+    h3   {{ color: #b0bec5; }}
+    code {{ background: #2a2a2a; }}
+    hr   {{ border-color: #444; }}
+  }}
+</style>
+</head>
+<body>
+<p class="meta">📈 {ticker} AI 實戰分析報告　｜　產生時間：{ts}</p>
+{body}
+</body>
+</html>"""
 
 
 # ── 頁面設定（必須第一行 st 呼叫）────────────────────────────────────────────
@@ -339,16 +410,22 @@ if st.session_state.run_analysis or st.session_state.analysis_done:
     # ── 下載 ＋ 重新分析按鈕 ──────────────────────────────────────────────
     if st.session_state.analysis_done and st.session_state.analysis_text:
         st.divider()
-        col_dl, col_new = st.columns([2, 1])
-        with col_dl:
-            filename = (
-                f"{ticker_input}_AI分析報告_"
-                f"{datetime.now().strftime('%Y%m%d_%H%M')}.md"
-            )
+        col_html, col_md, col_new = st.columns([1.8, 1.8, 1])
+        ts   = datetime.now().strftime("%Y%m%d_%H%M")
+        text = st.session_state.analysis_text
+
+        with col_html:
             st.download_button(
-                label="📥  下載完整分析報告（Markdown）",
-                data=st.session_state.analysis_text,
-                file_name=filename,
+                label="📱  下載 HTML（手機 / 瀏覽器直接開）",
+                data=_to_html(text, ticker_input).encode("utf-8"),
+                file_name=f"{ticker_input}_AI分析報告_{ts}.html",
+                mime="text/html",
+            )
+        with col_md:
+            st.download_button(
+                label="📄  下載 Markdown（.md）",
+                data=text,
+                file_name=f"{ticker_input}_AI分析報告_{ts}.md",
                 mime="text/markdown",
             )
         with col_new:
